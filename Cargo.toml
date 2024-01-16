@@ -1,0 +1,12 @@
+[package]
+name = "wasi-common-disjoint-guest"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = { version = "1.0", default-features = false }
+wasi = { version = "0.11", default-features = false }
+wasi-common = { version = "16.0", default-features = false }
+wiggle = { version = "16.0", default-features = false }
