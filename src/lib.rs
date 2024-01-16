@@ -6,6 +6,7 @@ use std::{
 
 use wiggle::{borrow::BorrowChecker, GuestMemory};
 
+mod ffi;
 pub mod snapshots;
 
 pub trait DisjointGuestMemoryAccess: Send + Sync {
@@ -70,7 +71,7 @@ impl<A: DisjointGuestMemoryAccess> DisjointGuestMemory<A> {
         buffer.reserve(padding + layout.size());
 
         for _ in 0..(padding + layout.size()) {
-            buffer.push(0.into());
+            buffer.push(0);
         }
 
         i32::from_ne_bytes((ptr as u32).to_ne_bytes())
@@ -128,7 +129,7 @@ impl<A: DisjointGuestMemoryAccess> DisjointGuestMemory<A> {
         Ok(())
     }
 
-    async fn with_write_to_async<T, E: Into<anyhow::Error>, F: Future<Output = Result<T, E>>>(
+    async fn with_write_to_guest<T, E: Into<anyhow::Error>, F: Future<Output = Result<T, E>>>(
         &self,
         guest: i32,
         layout: Layout,
@@ -142,5 +143,124 @@ impl<A: DisjointGuestMemoryAccess> DisjointGuestMemory<A> {
         self.write(host, guest, layout.size())?;
 
         Ok(res)
+    }
+
+    async fn with_iovs_to_guest<T, E: Into<anyhow::Error>, F: Future<Output = Result<T, E>>>(
+        &self,
+        iovs: i32,
+        iovs_len: i32,
+        inner: impl FnOnce(i32) -> F,
+    ) -> Result<T, anyhow::Error> {
+        // TODO: optimise
+        let iovs = u32::from_ne_bytes(iovs.to_ne_bytes());
+        let iovs_len = usize::try_from(u32::from_ne_bytes(iovs_len.to_ne_bytes()))?;
+
+        let iovec_layout = Layout::new::<ffi::Iovec>();
+        let size_layout = Layout::new::<ffi::Size>();
+
+        let host_iovs = self.alloc(Layout::array::<ffi::Iovec>(iovs_len)?);
+        let host_iovs_usize = usize::try_from(u32::from_ne_bytes(host_iovs.to_ne_bytes()))?;
+
+        for i in 0..iovs_len {
+            // TODO: check endianness
+            let len: ffi::Size = 0;
+            let mut len = len.to_le_bytes();
+            self.access
+                .read(iovs + u32::try_from(size_layout.size())?, &mut len)?;
+            let len = ffi::Size::from_le_bytes(len);
+            let len_usize = usize::try_from(len)?;
+
+            let host_iov = self.alloc(Layout::array::<u8>(len_usize)?);
+            self.buffer.borrow_mut()[(host_iovs_usize + i * iovec_layout.size())
+                ..(host_iovs_usize + i * iovec_layout.size() + size_layout.size())]
+                .copy_from_slice(&host_iov.to_le_bytes());
+            self.buffer.borrow_mut()[(host_iovs_usize
+                + i * iovec_layout.size()
+                + size_layout.size())
+                ..(host_iovs_usize + (i + 1) * iovec_layout.size())]
+                .copy_from_slice(&len.to_le_bytes());
+        }
+
+        let res = inner(host_iovs).await.map_err(Into::into)?;
+
+        for i in 0..iovs_len {
+            let buf: ffi::Pointer = 0;
+            let mut buf = buf.to_le_bytes();
+            buf.copy_from_slice(
+                &self.buffer.borrow()[(host_iovs_usize + i * iovec_layout.size())
+                    ..(host_iovs_usize + i * iovec_layout.size() + size_layout.size())],
+            );
+            let buf = ffi::Pointer::from_le_bytes(buf);
+            let buf = i32::from_ne_bytes(buf.to_ne_bytes());
+
+            let len: ffi::Size = 0;
+            let mut len = len.to_le_bytes();
+            len.copy_from_slice(
+                &self.buffer.borrow_mut()[(host_iovs_usize
+                    + i * iovec_layout.size()
+                    + size_layout.size())
+                    ..(host_iovs_usize + (i + 1) * iovec_layout.size())],
+            );
+            let len = ffi::Size::from_le_bytes(len);
+            let len = usize::try_from(len)?;
+
+            let ptr: ffi::Pointer = 0;
+            let mut ptr: [u8; 4] = ptr.to_le_bytes();
+            self.access
+                .read(iovs + u32::try_from(i * iovec_layout.size())?, &mut ptr)?;
+            let ptr = ffi::Pointer::from_le_bytes(ptr);
+            let ptr = i32::from_ne_bytes(ptr.to_ne_bytes());
+
+            self.write(buf, ptr, len)?;
+        }
+
+        Ok(res)
+    }
+
+    async fn with_ciovs_from_guest<T, E: Into<anyhow::Error>, F: Future<Output = Result<T, E>>>(
+        &self,
+        ciovs: i32,
+        ciovs_len: i32,
+        inner: impl FnOnce(i32) -> F,
+    ) -> Result<T, anyhow::Error> {
+        // TODO: optimise
+        let ciovs = u32::from_ne_bytes(ciovs.to_ne_bytes());
+        let ciovs_len = usize::try_from(u32::from_ne_bytes(ciovs_len.to_ne_bytes()))?;
+
+        let iovec_layout = Layout::new::<ffi::Iovec>();
+        let size_layout = Layout::new::<ffi::Size>();
+
+        let host_ciovs = self.alloc(Layout::array::<ffi::Iovec>(ciovs_len)?);
+        let host_ciovs_usize = usize::try_from(u32::from_ne_bytes(host_ciovs.to_ne_bytes()))?;
+
+        for i in 0..ciovs_len {
+            // TODO: check endianness
+            let ptr: ffi::Pointer = 0;
+            let mut ptr = ptr.to_le_bytes();
+            self.access.read(ciovs, &mut ptr)?;
+            let ptr = ffi::Pointer::from_le_bytes(ptr);
+            let ptr = i32::from_ne_bytes(ptr.to_ne_bytes());
+
+            let len: ffi::Size = 0;
+            let mut len = len.to_le_bytes();
+            self.access
+                .read(ciovs + u32::try_from(size_layout.size())?, &mut len)?;
+            let len = ffi::Size::from_le_bytes(len);
+            let len = usize::try_from(len)?;
+
+            let host_ciov = self.alloc(Layout::array::<u8>(len)?);
+            self.read(ptr, host_ciov, len)?;
+
+            self.buffer.borrow_mut()[(host_ciovs_usize + i * iovec_layout.size())
+                ..(host_ciovs_usize + i * iovec_layout.size() + size_layout.size())]
+                .copy_from_slice(&host_ciov.to_le_bytes());
+            self.buffer.borrow_mut()[(host_ciovs_usize
+                + i * iovec_layout.size()
+                + size_layout.size())
+                ..(host_ciovs_usize + (i + 1) * iovec_layout.size())]
+                .copy_from_slice(&len.to_le_bytes());
+        }
+
+        inner(host_ciovs).await.map_err(Into::into)
     }
 }

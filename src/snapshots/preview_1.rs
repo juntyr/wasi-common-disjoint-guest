@@ -3,17 +3,17 @@ use std::alloc::Layout;
 use anyhow::Result;
 use wasi_common::snapshots::preview_1::wasi_snapshot_preview1::{self, WasiSnapshotPreview1};
 
-use crate::{DisjointGuestMemory, DisjointGuestMemoryAccess};
+use crate::{ffi, DisjointGuestMemory, DisjointGuestMemoryAccess};
 
-pub async fn clock_time_get<'a, A: DisjointGuestMemoryAccess>(
+pub async fn clock_time_get<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
-    memory: &'a DisjointGuestMemory<A>,
+    memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     clock_id: i32,
     precision: i64,
     time: i32,
 ) -> Result<i32> {
     let ret = memory
-        .with_write_to_async(time, Layout::new::<wasi::Timestamp>(), |time| {
+        .with_write_to_guest(time, Layout::new::<ffi::Timestamp>(), |time| {
             wasi_snapshot_preview1::clock_time_get(ctx, memory, clock_id, precision, time)
         })
         .await?;
@@ -21,20 +21,21 @@ pub async fn clock_time_get<'a, A: DisjointGuestMemoryAccess>(
     Ok(ret)
 }
 
-pub async fn environ_get<'a, A: DisjointGuestMemoryAccess>(
+pub async fn environ_get<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
-    memory: &'a DisjointGuestMemory<A>,
+    memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     environ: i32,
     environ_buf: i32,
 ) -> Result<i32> {
     let (environ_size, environ_buf_size) = ctx.environ_sizes_get().await?;
     let ret = memory
-        .with_write_to_async(
+        .with_write_to_guest(
             environ,
-            Layout::array::<u32>(usize::try_from(environ_size)?)?,
+            Layout::array::<ffi::Pointer>(usize::try_from(environ_size)?)?,
             |environ| async move {
+                #[allow(clippy::let_and_return)]
                 let ret = memory
-                    .with_write_to_async(
+                    .with_write_to_guest(
                         environ_buf,
                         Layout::array::<u8>(usize::try_from(environ_buf_size)?)?,
                         |environ_buf| {
@@ -50,17 +51,17 @@ pub async fn environ_get<'a, A: DisjointGuestMemoryAccess>(
     Ok(ret)
 }
 
-pub async fn environ_sizes_get<'a, A: DisjointGuestMemoryAccess>(
+pub async fn environ_sizes_get<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
-    memory: &'a DisjointGuestMemory<A>,
+    memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     environ_size: i32,
     environ_buf_size: i32,
 ) -> Result<i32> {
     let ret = memory
-        .with_write_to_async(environ_size, Layout::new::<wasi::Size>(), |environ_size| {
-            memory.with_write_to_async(
+        .with_write_to_guest(environ_size, Layout::new::<ffi::Size>(), |environ_size| {
+            memory.with_write_to_guest(
                 environ_buf_size,
-                Layout::new::<wasi::Size>(),
+                Layout::new::<ffi::Size>(),
                 move |environ_buf_size| {
                     wasi_snapshot_preview1::environ_sizes_get(
                         ctx,
@@ -76,22 +77,22 @@ pub async fn environ_sizes_get<'a, A: DisjointGuestMemoryAccess>(
     Ok(ret)
 }
 
-pub async fn fd_close<'a, A: DisjointGuestMemoryAccess>(
+pub async fn fd_close<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
-    memory: &'a DisjointGuestMemory<A>,
+    memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     fd: i32,
 ) -> Result<i32> {
     wasi_snapshot_preview1::fd_close(ctx, memory, fd).await
 }
 
-pub async fn fd_fdstat_get<'a, A: DisjointGuestMemoryAccess>(
+pub async fn fd_fdstat_get<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
-    memory: &'a DisjointGuestMemory<A>,
+    memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     fd: i32,
     fdstat: i32,
 ) -> Result<i32> {
     let ret = memory
-        .with_write_to_async(fdstat, Layout::new::<wasi::Fdstat>(), |fdstat| {
+        .with_write_to_guest(fdstat, Layout::new::<ffi::Fdstat>(), |fdstat| {
             wasi_snapshot_preview1::fd_fdstat_get(ctx, memory, fd, fdstat)
         })
         .await?;
@@ -99,14 +100,14 @@ pub async fn fd_fdstat_get<'a, A: DisjointGuestMemoryAccess>(
     Ok(ret)
 }
 
-pub async fn fd_prestat_get<'a, A: DisjointGuestMemoryAccess>(
+pub async fn fd_prestat_get<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
-    memory: &'a DisjointGuestMemory<A>,
+    memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     fd: i32,
     prestat: i32,
 ) -> Result<i32> {
     let ret = memory
-        .with_write_to_async(prestat, Layout::new::<wasi::Prestat>(), |prestat| {
+        .with_write_to_guest(prestat, Layout::new::<ffi::Prestat>(), |prestat| {
             wasi_snapshot_preview1::fd_prestat_get(ctx, memory, fd, prestat)
         })
         .await?;
@@ -114,16 +115,16 @@ pub async fn fd_prestat_get<'a, A: DisjointGuestMemoryAccess>(
     Ok(ret)
 }
 
-pub async fn fd_prestat_dir_name<'a, A: DisjointGuestMemoryAccess>(
+pub async fn fd_prestat_dir_name<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
-    memory: &'a DisjointGuestMemory<A>,
+    memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     fd: i32,
     path: i32,
     path_len: i32,
 ) -> Result<i32> {
     let path_len_usize = usize::try_from(u32::from_ne_bytes(path_len.to_ne_bytes()))?;
     let ret = memory
-        .with_write_to_async(path, Layout::array::<u8>(path_len_usize)?, |path| {
+        .with_write_to_guest(path, Layout::array::<u8>(path_len_usize)?, |path| {
             wasi_snapshot_preview1::fd_prestat_dir_name(ctx, memory, fd, path, path_len)
         })
         .await?;
@@ -131,18 +132,35 @@ pub async fn fd_prestat_dir_name<'a, A: DisjointGuestMemoryAccess>(
     Ok(ret)
 }
 
-// TODO: fd_read
-
-pub async fn fd_seek<'a, A: DisjointGuestMemoryAccess>(
+pub async fn fd_read<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
-    memory: &'a DisjointGuestMemory<A>,
+    memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
+    fd: i32,
+    iovs: i32,
+    iovs_len: i32,
+    nread: i32,
+) -> Result<i32> {
+    let ret = memory
+        .with_iovs_to_guest(iovs, iovs_len, |iovs| {
+            memory.with_write_to_guest(nread, Layout::new::<ffi::Size>(), move |nread| {
+                wasi_snapshot_preview1::fd_read(ctx, memory, fd, iovs, iovs_len, nread)
+            })
+        })
+        .await?;
+    memory.clear();
+    Ok(ret)
+}
+
+pub async fn fd_seek<'a>(
+    ctx: &'a mut impl WasiSnapshotPreview1,
+    memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     fd: i32,
     offset: i64,
     whence: i32,
     new_offset: i32,
 ) -> Result<i32> {
     let ret = memory
-        .with_write_to_async(new_offset, Layout::new::<wasi::Filesize>(), |new_offset| {
+        .with_write_to_guest(new_offset, Layout::new::<ffi::Filesize>(), |new_offset| {
             wasi_snapshot_preview1::fd_seek(ctx, memory, fd, offset, whence, new_offset)
         })
         .await?;
@@ -150,11 +168,28 @@ pub async fn fd_seek<'a, A: DisjointGuestMemoryAccess>(
     Ok(ret)
 }
 
-// TODO: fd_write
-
-pub async fn proc_exit<'a, A: DisjointGuestMemoryAccess>(
+pub async fn fd_write<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
-    memory: &'a DisjointGuestMemory<A>,
+    memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
+    fd: i32,
+    ciovs: i32,
+    ciovs_len: i32,
+    nwritten: i32,
+) -> Result<i32> {
+    let ret = memory
+        .with_ciovs_from_guest(ciovs, ciovs_len, |ciovs| {
+            memory.with_write_to_guest(nwritten, Layout::new::<ffi::Size>(), move |nwritten| {
+                wasi_snapshot_preview1::fd_write(ctx, memory, fd, ciovs, ciovs_len, nwritten)
+            })
+        })
+        .await?;
+    memory.clear();
+    Ok(ret)
+}
+
+pub async fn proc_exit<'a>(
+    ctx: &'a mut impl WasiSnapshotPreview1,
+    memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     rval: i32,
 ) -> Result<()> {
     wasi_snapshot_preview1::proc_exit(ctx, memory, rval).await
