@@ -10,8 +10,8 @@ mod ffi;
 pub mod snapshots;
 
 pub trait DisjointGuestMemoryAccess: Send + Sync {
-    fn read(&self, offset: u32, into: &mut [u8]) -> Result<(), wiggle::GuestError>;
-    fn write(&self, offset: u32, from: &[u8]) -> Result<(), wiggle::GuestError>;
+    fn read(&self, offset: u32, into: &mut [u8]) -> Result<(), anyhow::Error>;
+    fn write(&self, offset: u32, from: &[u8]) -> Result<(), anyhow::Error>;
 }
 
 pub struct DisjointGuestMemory<A: DisjointGuestMemoryAccess> {
@@ -90,7 +90,7 @@ impl<A: DisjointGuestMemoryAccess> DisjointGuestMemory<A> {
         self.buffer.borrow_mut().clear();
     }
 
-    fn read(&self, guest_from: i32, host_into: i32, len: usize) -> Result<(), wiggle::GuestError> {
+    fn read(&self, guest_from: i32, host_into: i32, len: usize) -> Result<(), anyhow::Error> {
         let mut buffer = self.buffer.borrow_mut();
 
         let guest_from = u32::from_ne_bytes(guest_from.to_ne_bytes());
@@ -114,7 +114,7 @@ impl<A: DisjointGuestMemoryAccess> DisjointGuestMemory<A> {
         Ok(())
     }
 
-    fn write(&self, host_from: i32, guest_into: i32, len: usize) -> Result<(), wiggle::GuestError> {
+    fn write(&self, host_from: i32, guest_into: i32, len: usize) -> Result<(), anyhow::Error> {
         let buffer = self.buffer.borrow();
 
         let host_from = u32::from_ne_bytes(host_from.to_ne_bytes());
