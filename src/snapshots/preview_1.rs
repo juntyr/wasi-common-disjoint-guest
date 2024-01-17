@@ -7,7 +7,7 @@ use wasi_common::snapshots::preview_1::wasi_snapshot_preview1::{self, WasiSnapsh
 
 use crate::{ffi, DisjointGuestMemory, DisjointGuestMemoryAccess};
 
-pub async fn clock_time_get<'a>(
+pub fn clock_time_get<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
     memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     clock_id: i32,
@@ -25,7 +25,7 @@ pub async fn clock_time_get<'a>(
     }
 }
 
-pub async fn environ_get<'a>(
+pub fn environ_get<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
     memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     environ: i32,
@@ -62,7 +62,7 @@ pub async fn environ_get<'a>(
     }
 }
 
-pub async fn environ_sizes_get<'a>(
+pub fn environ_sizes_get<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
     memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     environ_size: i32,
@@ -90,7 +90,7 @@ pub async fn environ_sizes_get<'a>(
     }
 }
 
-pub async fn fd_close<'a>(
+pub fn fd_close<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
     memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     fd: i32,
@@ -98,7 +98,7 @@ pub async fn fd_close<'a>(
     wasi_snapshot_preview1::fd_close(ctx, memory, fd)
 }
 
-pub async fn fd_fdstat_get<'a>(
+pub fn fd_fdstat_get<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
     memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     fd: i32,
@@ -115,7 +115,7 @@ pub async fn fd_fdstat_get<'a>(
     }
 }
 
-pub async fn fd_prestat_get<'a>(
+pub fn fd_prestat_get<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
     memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     fd: i32,
@@ -132,7 +132,7 @@ pub async fn fd_prestat_get<'a>(
     }
 }
 
-pub async fn fd_prestat_dir_name<'a>(
+pub fn fd_prestat_dir_name<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
     memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     fd: i32,
@@ -151,7 +151,7 @@ pub async fn fd_prestat_dir_name<'a>(
     }
 }
 
-pub async fn fd_read<'a>(
+pub fn fd_read<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
     memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     fd: i32,
@@ -172,7 +172,7 @@ pub async fn fd_read<'a>(
     }
 }
 
-pub async fn fd_seek<'a>(
+pub fn fd_seek<'a>(
     ctx: &'a mut impl WasiSnapshotPreview1,
     memory: &'a DisjointGuestMemory<impl DisjointGuestMemoryAccess>,
     fd: i32,
