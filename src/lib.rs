@@ -60,6 +60,15 @@ unsafe impl<A: DisjointGuestMemoryAccess> GuestMemory for DisjointGuestMemory<A>
 }
 
 impl<A: DisjointGuestMemoryAccess> DisjointGuestMemory<A> {
+    #[must_use]
+    pub fn new(access: A) -> Self {
+        Self {
+            access,
+            buffer: RefCell::new(Vec::new()),
+            bc: BorrowChecker::new(),
+        }
+    }
+
     // TODO: use guard-based API instead
     fn alloc(&self, layout: Layout) -> i32 {
         let mut buffer = self.buffer.borrow_mut();
