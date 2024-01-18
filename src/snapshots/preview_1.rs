@@ -21,7 +21,7 @@ pub fn clock_time_get<'a>(
             .with_write_to_guest(time, Layout::new::<ffi::Timestamp>(), |alloc, time| {
                 wasi_snapshot_preview1::clock_time_get(
                     ctx,
-                    alloc.as_memory(),
+                    alloc.get_memory(),
                     clock_id,
                     precision,
                     time,
@@ -59,7 +59,7 @@ pub fn environ_get<'a>(
                             |alloc, environ_buf| {
                                 wasi_snapshot_preview1::environ_get(
                                     ctx,
-                                    alloc.as_memory(),
+                                    alloc.get_memory(),
                                     environ,
                                     environ_buf,
                                 )
@@ -97,7 +97,7 @@ pub fn environ_sizes_get<'a>(
                         move |alloc, environ_buf_size| {
                             wasi_snapshot_preview1::environ_sizes_get(
                                 ctx,
-                                alloc.as_memory(),
+                                alloc.get_memory(),
                                 environ_size,
                                 environ_buf_size,
                             )
@@ -121,7 +121,7 @@ pub fn fd_close<'a>(
     async move {
         let mut alloc = memory.get_alloc()?;
 
-        let res = wasi_snapshot_preview1::fd_close(ctx, alloc.as_memory(), fd).await?;
+        let res = wasi_snapshot_preview1::fd_close(ctx, alloc.get_memory(), fd).await?;
 
         alloc.finalise()?;
 
@@ -140,7 +140,7 @@ pub fn fd_fdstat_get<'a>(
 
         let ret = alloc
             .with_write_to_guest(fdstat, Layout::new::<ffi::Fdstat>(), |alloc, fdstat| {
-                wasi_snapshot_preview1::fd_fdstat_get(ctx, alloc.as_memory(), fd, fdstat)
+                wasi_snapshot_preview1::fd_fdstat_get(ctx, alloc.get_memory(), fd, fdstat)
             })
             .await?;
 
@@ -161,7 +161,7 @@ pub fn fd_prestat_get<'a>(
 
         let ret = alloc
             .with_write_to_guest(prestat, Layout::new::<ffi::Prestat>(), |alloc, prestat| {
-                wasi_snapshot_preview1::fd_prestat_get(ctx, alloc.as_memory(), fd, prestat)
+                wasi_snapshot_preview1::fd_prestat_get(ctx, alloc.get_memory(), fd, prestat)
             })
             .await?;
 
@@ -186,7 +186,7 @@ pub fn fd_prestat_dir_name<'a>(
             .with_write_to_guest(path, Layout::array::<u8>(path_len_usize)?, |alloc, path| {
                 wasi_snapshot_preview1::fd_prestat_dir_name(
                     ctx,
-                    alloc.as_memory(),
+                    alloc.get_memory(),
                     fd,
                     path,
                     path_len,
@@ -216,7 +216,7 @@ pub fn fd_read<'a>(
                 alloc.with_write_to_guest(nread, Layout::new::<ffi::Size>(), move |alloc, nread| {
                     wasi_snapshot_preview1::fd_read(
                         ctx,
-                        alloc.as_memory(),
+                        alloc.get_memory(),
                         fd,
                         iovs,
                         iovs_len,
@@ -250,7 +250,7 @@ pub fn fd_seek<'a>(
                 |alloc, new_offset| {
                     wasi_snapshot_preview1::fd_seek(
                         ctx,
-                        alloc.as_memory(),
+                        alloc.get_memory(),
                         fd,
                         offset,
                         whence,
@@ -285,7 +285,7 @@ pub fn fd_write<'a>(
                     move |alloc, nwritten| {
                         wasi_snapshot_preview1::fd_write(
                             ctx,
-                            alloc.as_memory(),
+                            alloc.get_memory(),
                             fd,
                             ciovs,
                             ciovs_len,
@@ -311,7 +311,7 @@ pub fn proc_exit<'a>(
         let mut alloc = memory.get_alloc()?;
 
         #[allow(clippy::let_unit_value)]
-        let () = wasi_snapshot_preview1::proc_exit(ctx, alloc.as_memory(), rval).await?;
+        let () = wasi_snapshot_preview1::proc_exit(ctx, alloc.get_memory(), rval).await?;
 
         alloc.finalise()?;
 

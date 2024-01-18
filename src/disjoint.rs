@@ -21,10 +21,12 @@ pub struct DisjointGuestMemoryAdapter<A: DisjointGuestMemoryAccess> {
 
 pub struct DisjointGuestMemoryAlloc<A: DisjointGuestMemoryAccess> {
     access: A,
-    buffer: Vec<u8>,
+    buffer: Vec<UnsafeCell<u8>>,
     writes: Vec<DelayedWrite>,
     bc: BorrowChecker,
 }
+
+unsafe impl<A: DisjointGuestMemoryAccess> Sync for DisjointGuestMemoryAlloc<A> {}
 
 enum DelayedWrite {
     Write {
@@ -73,7 +75,7 @@ impl<'a, A: DisjointGuestMemoryAccess> DisjointGuestMemoryAllocGuard<'a, A> {
                         let buf: ffi::Pointer = 0;
                         let mut buf = buf.to_le_bytes();
                         buf.copy_from_slice(
-                            &self.buffer[(host_iovs_usize + i * iovec_layout.size())
+                            &self.get_buffer_mut()[(host_iovs_usize + i * iovec_layout.size())
                                 ..(host_iovs_usize + i * iovec_layout.size() + size_layout.size())],
                         );
                         let buf = ffi::Pointer::from_le_bytes(buf);
@@ -82,7 +84,7 @@ impl<'a, A: DisjointGuestMemoryAccess> DisjointGuestMemoryAllocGuard<'a, A> {
                         let len: ffi::Size = 0;
                         let mut len = len.to_le_bytes();
                         len.copy_from_slice(
-                            &self.buffer[(host_iovs_usize
+                            &self.get_buffer_mut()[(host_iovs_usize
                                 + i * iovec_layout.size()
                                 + size_layout.size())
                                 ..(host_iovs_usize + (i + 1) * iovec_layout.size())],
@@ -137,10 +139,7 @@ pub struct DisjointGuestMemory<A: DisjointGuestMemoryAccess> {
 
 unsafe impl<A: DisjointGuestMemoryAccess> GuestMemory for DisjointGuestMemory<A> {
     fn base(&self) -> &[UnsafeCell<u8>] {
-        // Safety: see DisjointGuestMemoryAlloc::as_memory
-        unsafe {
-            std::slice::from_raw_parts(self.inner.buffer.as_ptr().cast(), self.inner.buffer.len())
-        }
+        &self.inner.buffer
     }
 
     fn has_outstanding_borrows(&self) -> bool {
@@ -193,98 +192,15 @@ impl<A: DisjointGuestMemoryAccess> DisjointGuestMemoryAdapter<A> {
             )),
         }
     }
-
-    pub async fn with_alloc<'a, T, F: Future<Output = anyhow::Result<T>> + 'a>(
-        &'a self,
-        inner: impl FnOnce(&mut DisjointGuestMemoryAlloc<A>) -> F,
-    ) -> anyhow::Result<T> {
-        #![allow(clippy::await_holding_lock)]
-        let mut alloc = self
-            .inner
-            .lock()
-            .map_err(|_| anyhow::format_err!("DisjointGuestMemoryAdapter is poisoned"))?;
-
-        let result = inner(&mut alloc).await;
-
-        debug_assert!(!alloc.bc.has_outstanding_borrows());
-        alloc.buffer.clear();
-
-        result
-    }
 }
 
 impl<A: DisjointGuestMemoryAccess> DisjointGuestMemoryAlloc<A> {
-    pub fn as_memory(&mut self) -> &DisjointGuestMemory<A> {
-        // Safety:
-        //  - DisjointGuestMemory is a transparent newtype around Self
-        //  - self is mutably borrowed
-        //  - exposing interior mutability to self.buffer's contents is safe
-        //    since mutation is allowed
+    pub fn get_memory(&mut self) -> &DisjointGuestMemory<A> {
+        // Safety: DisjointGuestMemory is a transparent newtype around Self
+        // Note: Taking a mutable borrow also ensures that the interior
+        //       mutability GuestMemory::base API is only exposed within an
+        //       exterior mutability scope
         unsafe { &*(self as *const Self).cast() }
-    }
-
-    fn alloc(&mut self, layout: Layout) -> i32 {
-        let ptr = self
-            .buffer
-            .len()
-            .wrapping_add(layout.align())
-            .wrapping_sub(1)
-            & !layout.align().wrapping_sub(1);
-        let padding = ptr.wrapping_sub(self.buffer.len());
-
-        self.buffer.reserve(padding + layout.size());
-
-        for _ in 0..(padding + layout.size()) {
-            self.buffer.push(0);
-        }
-
-        i32::from_ne_bytes((ptr as u32).to_ne_bytes())
-    }
-
-    fn read(&mut self, guest_from: i32, host_into: i32, len: usize) -> Result<(), anyhow::Error> {
-        let guest_from = u32::from_ne_bytes(guest_from.to_ne_bytes());
-        let host_into = u32::from_ne_bytes(host_into.to_ne_bytes());
-
-        let len_u32 = u32::try_from(len)?;
-
-        let host_region = wiggle::Region {
-            start: host_into,
-            len: len_u32,
-        };
-
-        let host_into = usize::try_from(host_into)?;
-        let host = self
-            .buffer
-            .get_mut(host_into..)
-            .and_then(|s| s.get_mut(0..len))
-            .ok_or(wiggle::GuestError::PtrOutOfBounds(host_region))?;
-
-        self.access.read(guest_from, host)?;
-
-        Ok(())
-    }
-
-    fn write(&mut self, host_from: i32, guest_into: i32, len: usize) -> Result<(), anyhow::Error> {
-        let host_from = u32::from_ne_bytes(host_from.to_ne_bytes());
-        let guest_into = u32::from_ne_bytes(guest_into.to_ne_bytes());
-
-        let len_u32 = u32::try_from(len)?;
-
-        let host_region: wiggle::Region = wiggle::Region {
-            start: host_from,
-            len: len_u32,
-        };
-
-        let host_from = usize::try_from(host_from)?;
-        let host = self
-            .buffer
-            .get(host_from..)
-            .and_then(|s| s.get(0..len))
-            .ok_or(wiggle::GuestError::PtrOutOfBounds(host_region))?;
-
-        self.access.write(guest_into, host)?;
-
-        Ok(())
     }
 
     pub async fn with_write_to_guest<
@@ -341,10 +257,10 @@ impl<A: DisjointGuestMemoryAccess> DisjointGuestMemoryAlloc<A> {
             let len_usize = usize::try_from(len)?;
 
             let host_iov = self.alloc(Layout::array::<u8>(len_usize)?);
-            self.buffer[(host_iovs_usize + i * iovec_layout.size())
+            self.get_buffer_mut()[(host_iovs_usize + i * iovec_layout.size())
                 ..(host_iovs_usize + i * iovec_layout.size() + size_layout.size())]
                 .copy_from_slice(&host_iov.to_le_bytes());
-            self.buffer[(host_iovs_usize + i * iovec_layout.size() + size_layout.size())
+            self.get_buffer_mut()[(host_iovs_usize + i * iovec_layout.size() + size_layout.size())
                 ..(host_iovs_usize + (i + 1) * iovec_layout.size())]
                 .copy_from_slice(&len.to_le_bytes());
         }
@@ -399,14 +315,97 @@ impl<A: DisjointGuestMemoryAccess> DisjointGuestMemoryAlloc<A> {
             let host_ciov = self.alloc(Layout::array::<u8>(len)?);
             self.read(ptr, host_ciov, len)?;
 
-            self.buffer[(host_ciovs_usize + i * iovec_layout.size())
+            self.get_buffer_mut()[(host_ciovs_usize + i * iovec_layout.size())
                 ..(host_ciovs_usize + i * iovec_layout.size() + size_layout.size())]
                 .copy_from_slice(&host_ciov.to_le_bytes());
-            self.buffer[(host_ciovs_usize + i * iovec_layout.size() + size_layout.size())
+            self.get_buffer_mut()[(host_ciovs_usize + i * iovec_layout.size() + size_layout.size())
                 ..(host_ciovs_usize + (i + 1) * iovec_layout.size())]
                 .copy_from_slice(&len.to_le_bytes());
         }
 
         inner(self, host_ciovs).await.map_err(Into::into)
     }
+}
+
+impl<A: DisjointGuestMemoryAccess> DisjointGuestMemoryAlloc<A> {
+    fn get_buffer_mut(&mut self) -> &mut [u8] {
+        retag_mut(&mut self.buffer)
+    }
+
+    fn alloc(&mut self, layout: Layout) -> i32 {
+        let ptr = self
+            .buffer
+            .len()
+            .wrapping_add(layout.align())
+            .wrapping_sub(1)
+            & !layout.align().wrapping_sub(1);
+        let padding = ptr.wrapping_sub(self.buffer.len());
+
+        self.buffer.reserve(padding + layout.size());
+
+        for _ in 0..(padding + layout.size()) {
+            self.buffer.push(UnsafeCell::new(0));
+        }
+
+        i32::from_ne_bytes((ptr as u32).to_ne_bytes())
+    }
+
+    fn read(&mut self, guest_from: i32, host_into: i32, len: usize) -> Result<(), anyhow::Error> {
+        let guest_from = u32::from_ne_bytes(guest_from.to_ne_bytes());
+        let host_into = u32::from_ne_bytes(host_into.to_ne_bytes());
+
+        let len_u32 = u32::try_from(len)?;
+
+        let host_region = wiggle::Region {
+            start: host_into,
+            len: len_u32,
+        };
+
+        let host_into = usize::try_from(host_into)?;
+        let host = self
+            .buffer
+            .get_mut(host_into..)
+            .and_then(|s| s.get_mut(0..len))
+            .ok_or(wiggle::GuestError::PtrOutOfBounds(host_region))?;
+        // Note: we need to use retag directly to be explicit about disjoint
+        //       mutable borrows over self.buffer and self.access
+        let host: &mut [u8] = retag_mut(host);
+
+        self.access.read(guest_from, host)?;
+
+        Ok(())
+    }
+
+    fn write(&mut self, host_from: i32, guest_into: i32, len: usize) -> Result<(), anyhow::Error> {
+        let host_from = u32::from_ne_bytes(host_from.to_ne_bytes());
+        let guest_into = u32::from_ne_bytes(guest_into.to_ne_bytes());
+
+        let len_u32 = u32::try_from(len)?;
+
+        let host_region: wiggle::Region = wiggle::Region {
+            start: host_from,
+            len: len_u32,
+        };
+
+        let host_from = usize::try_from(host_from)?;
+        let host = self
+            .buffer
+            .get_mut(host_from..)
+            .and_then(|s| s.get_mut(0..len))
+            .ok_or(wiggle::GuestError::PtrOutOfBounds(host_region))?;
+        // Note: we need to use retag directly to be explicit about disjoint
+        //       mutable borrows over self.buffer and self.access
+        let host: &[u8] = retag_mut(host);
+
+        self.access.write(guest_into, host)?;
+
+        Ok(())
+    }
+}
+
+fn retag_mut(v: &mut [UnsafeCell<u8>]) -> &mut [u8] {
+    // Safety:
+    //  - &mut [UnsafeCell<u8>] gives us access to each &mut UnsafeCell<u8>
+    //  - UnsafeCell<u8>::get_mut turns &mut UnsafeCell<u8> into &mut u8
+    unsafe { std::mem::transmute(v) }
 }
